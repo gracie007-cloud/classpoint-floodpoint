@@ -9,7 +9,7 @@ export const VERSION = "2.0.0";
  * Default name prefix for bot usernames
  * Can be overridden by user input
  */
-export const DEFAULT_NAME_PREFIX = "sigma";
+export const DEFAULT_NAME_PREFIX = "fp-bot";
 
 /**
  * Scanner configuration
