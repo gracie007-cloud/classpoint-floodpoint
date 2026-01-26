@@ -1,219 +1,228 @@
-//app/scanner/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
-import Link from "next/link";
+import { Navigation } from "@/components/navigation";
+import { Footer } from "@/components/footer";
+import { ScanResultsList } from "@/components/scan-results-list";
+import { useScannerContext } from "@/contexts/scanner-context";
+import { SCANNER_CONFIG } from "@/src/config";
 
-interface ValidClassCode {
-  code: number;
-  email: string;
+/**
+ * Format elapsed time in human-readable format
+ */
+function formatElapsedTime(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+
+  if (minutes === 0) {
+    return `${remainingSeconds}s`;
+  }
+  return `${minutes}m ${remainingSeconds}s`;
 }
 
-export default function Home() {
-  const [threads, setThreads] = useState(8);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [results, setResults] = useState<ValidClassCode[]>([]);
-  const [polling, setPolling] = useState(false);
-  const pathname = usePathname();
+/**
+ * Calculate scan progress percentage
+ */
+function calculateProgress(
+  scannedCount: number,
+  totalCodes: number
+): number {
+  if (totalCodes === 0) return 0;
+  return Math.min(100, Math.round((scannedCount / totalCodes) * 100));
+}
 
-  const startScan = async () => {
-    setLoading(true);
-    setMessage("");
-    setResults([]);
-    setPolling(true);
+export default function ScannerPage() {
+  const {
+    results,
+    isScanning,
+    isLoading,
+    message,
+    progress,
+    startScan,
+    stopScan,
+  } = useScannerContext();
 
-    try {
-      const response = await fetch("/api/spam/start", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          start: 10000,
-          end: 99999,
-        }),
-      });
-
-      const data = await response.json();
-      if (data.started) {
-        setMessage("Scan started successfully.");
-      } else {
-        setMessage("Failed to start scan.");
-        setPolling(false);
-      }
-    } catch (error) {
-      setMessage("Error initiating scan.");
-      setPolling(false);
-    } finally {
-      setLoading(false);
-    }
+  const handleStartScan = async () => {
+    await startScan(SCANNER_CONFIG.START_CODE, SCANNER_CONFIG.END_CODE);
   };
 
-  const stopScan = async () => {
-    setLoading(true);
-    setMessage("");
-
-    try {
-      const response = await fetch("/api/spam/stop", {
-        method: "POST",
-      });
-
-      const data = await response.json();
-      if (data.stopped) {
-        setMessage("Scan stopped successfully.");
-        setPolling(false);
-      } else {
-        setMessage(data.message || "No scan was running.");
-      }
-    } catch (error) {
-      setMessage("Error stopping scan.");
-    } finally {
-      setLoading(false);
-    }
+  const handleStopScan = async () => {
+    await stopScan();
   };
 
-  useEffect(() => {
-    if (!polling) return;
+  const isError = message?.includes("Error") || message?.includes("Failed") || message?.includes("Too many");
+  const canStart = !isLoading && !isScanning;
+  const canStop = isScanning && !isLoading;
 
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch("/api/spam/results");
-        if (res.ok) {
-          const data = await res.json();
-          setResults(data.validClassCodes || []);
-        }
-      } catch (error) {
-        console.error("Error fetching results:", error);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [polling]);
+  const totalCodes = SCANNER_CONFIG.END_CODE - SCANNER_CONFIG.START_CODE + 1;
+  const progressPercent = progress 
+    ? calculateProgress(progress.scannedCount, totalCodes) 
+    : 0;
 
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <nav className="row-start-1 flex gap-4 items-center">
-        <Link
-          href="/"
-          className={`px-4 py-2 rounded-lg transition-colors ${
-            pathname === "/"
-              ? "bg-foreground text-background"
-              : "hover:bg-gray-100 dark:hover:bg-gray-800"
-          }`}
-        >
-          Flooder
-        </Link>
-        <Link
-          href="/scanner"
-          className={`px-4 py-2 rounded-lg transition-colors ${
-            pathname === "/scanner"
-              ? "bg-foreground text-background"
-              : "hover:bg-gray-100 dark:hover:bg-gray-800"
-          }`}
-        >
-          Scanner
-        </Link>
-      </nav>
-      <main className="flex flex-col gap-6 row-start-2 items-center sm:items-start w-full max-w-md">
-        <Image
-          className=""
-          src="/logo.svg"
-          alt="ClassPoint Scanner logo"
-          width={270}
-          height={57}
-          priority
-        />
-        <h1 className="text-lg text-center sm:text-left font-[family-name:var(--font-geist-mono)] mb-1">
-          Scanner Mode
-        </h1>
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Navigation */}
+      <header className="pt-8 pb-6 flex justify-center">
+        <Navigation />
+      </header>
 
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by clicking the scan button to begin searching for valid
-            codes.
-          </li>
-          <li className="mb-2">
-            The scanner will automatically collect and display results.
-          </li>
-          <li>Use the stop button to end the scan at any time.</li>
-        </ol>
+      {/* Main content */}
+      <main className="flex-1 flex flex-col items-center px-6">
+        <div className="w-full max-w-md">
+          {/* Logo & Description */}
+          <div className="text-center mb-8">
+            <Image
+              src="/logo.svg"
+              alt="Floodpoint - ClassPoint session scanner"
+              width={280}
+              height={60}
+              priority
+              className="mx-auto"
+            />
+            <p className="mt-4 text-muted-foreground text-sm">
+              Scan for active ClassPoint sessions in the {SCANNER_CONFIG.START_CODE.toLocaleString()}–{SCANNER_CONFIG.END_CODE.toLocaleString()} range.
+            </p>
+          </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row w-full">
-          <Button
-            className={`rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-white text-black gap-2 hover:bg-gray-300 dark:hover:bg-gray-200 text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 cursor-pointer ${
-              loading || polling ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-            onClick={startScan}
-            disabled={loading || polling}
-          >
-            {loading || polling ? "Scanning..." : "Start Scan"}
-          </Button>
+          {/* Actions */}
+          <div className="flex gap-3 mb-6">
+            <button
+              type="button"
+              onClick={handleStartScan}
+              disabled={!canStart}
+              className={`flex-1 h-10 rounded-lg text-sm font-medium transition-all duration-150 ${
+                !canStart
+                  ? "bg-secondary text-muted-foreground cursor-not-allowed"
+                  : "bg-[hsl(var(--fp-sky))] text-white hover:bg-[hsl(var(--fp-ocean))]"
+              }`}
+            >
+              {isLoading && !isScanning ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Starting
+                </span>
+              ) : isScanning ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Scanning
+                </span>
+              ) : (
+                "Start Scan"
+              )}
+            </button>
 
-          <button
-            className={`rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-red-500 text-white gap-2 hover:bg-red-600 text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 cursor-pointer ${
-              !polling || loading ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-            onClick={stopScan}
-            disabled={!polling || loading}
-          >
-            {loading ? "Processing..." : "Stop Scan"}
-          </button>
+            <button
+              type="button"
+              onClick={handleStopScan}
+              disabled={!canStop}
+              className={`px-5 h-10 rounded-lg text-sm font-medium border transition-colors duration-150 ${
+                !canStop
+                  ? "border-border text-muted-foreground cursor-not-allowed opacity-50"
+                  : "border-border text-foreground hover:bg-secondary"
+              }`}
+            >
+              Stop
+            </button>
+          </div>
+
+          {/* Progress indicator */}
+          {isScanning && progress && (
+            <div className="mb-6 space-y-3 animate-fade-in">
+              {/* Progress bar */}
+              <div className="relative h-2 bg-secondary rounded-full overflow-hidden">
+                <div 
+                  className="absolute inset-y-0 left-0 bg-[hsl(var(--fp-sky))] transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              
+              {/* Stats row */}
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>
+                  Scanned: <span className="font-medium text-foreground">{progress.scannedCount.toLocaleString()}</span> / {totalCodes.toLocaleString()}
+                </span>
+                <span>
+                  {progressPercent}%
+                </span>
+              </div>
+
+              {/* Additional info */}
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">
+                  Currently checking: <span className="font-mono text-foreground">{progress.currentCode}</span>
+                </span>
+                {progress.elapsedMs && (
+                  <span className="text-muted-foreground">
+                    {formatElapsedTime(progress.elapsedMs)}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Found sessions counter */}
+          {isScanning && (
+            <div className="mb-6 p-3 rounded-lg bg-secondary text-center animate-fade-in">
+              <span className="text-sm text-foreground">
+                Found <span className="font-medium text-[hsl(var(--fp-sky))]">{results.length}</span> {results.length === 1 ? "session" : "sessions"}
+              </span>
+            </div>
+          )}
+
+          {/* Message */}
+          {message && !isScanning && (
+            <div
+              className={`mb-6 p-3 rounded-lg text-sm text-center animate-fade-in ${
+                isError
+                  ? "bg-red-500/5 border border-red-500/20 text-red-600 dark:text-red-400"
+                  : "bg-secondary text-muted-foreground"
+              }`}
+            >
+              {message}
+            </div>
+          )}
+
+          {/* Results */}
+          {results.length > 0 && (
+            <div className="mb-6">
+              <ScanResultsList results={results} />
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!isScanning && results.length === 0 && !message && (
+            <div className="text-center py-10 border border-dashed border-border rounded-lg">
+              <svg
+                className="w-8 h-8 mx-auto mb-3 text-muted-foreground/50"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+              </svg>
+              <p className="text-sm text-muted-foreground">
+                No active sessions found yet
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Click &quot;Start Scan&quot; to begin searching
+              </p>
+            </div>
+          )}
         </div>
-
-        {message && (
-          <div className="w-full p-4 rounded-lg bg-gray-100 dark:bg-gray-800">
-            <p className="text-sm text-center">{message}</p>
-          </div>
-        )}
-
-        {results.length > 0 && (
-          <div className="w-full mt-4">
-            <h2 className="text-lg font-semibold mb-4">
-              Valid Class Codes Found:
-            </h2>
-            <ul className="space-y-2">
-              {results.map((item) => (
-                <li
-                  key={item.code}
-                  className="p-4 border rounded-lg bg-green-100 border-green-500 dark:bg-green-900 dark:border-green-700"
-                >
-                  <p className="font-bold text-green-800 dark:text-green-200">
-                    Code: {item.code}
-                  </p>
-                  <p className="text-sm text-green-700 dark:text-green-300">
-                    Email: {item.email}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </main>
 
-      <footer className="row-start-3">
-        Built by{" "}
-        <a
-          href="https://github.com/InsanelyAvner"
-          target="_blank"
-          rel="noreferrer"
-          className="font-medium underline underline-offset-4"
-        >
-          InsanelyAvner
-        </a>
-        . The source code is available on{" "}
-        <a
-          href="https://github.com/InsanelyAvner/floodpoint"
-          target="_blank"
-          rel="noreferrer"
-          className="font-medium underline underline-offset-4"
-        >
-          GitHub
-        </a>
-        .
+      {/* Footer */}
+      <footer className="py-8 text-center">
+        <Footer />
       </footer>
     </div>
   );

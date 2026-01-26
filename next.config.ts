@@ -3,8 +3,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
-  // Removed webpack configuration as Turbopack is the default bundler
+  // Enable image optimization for external sources if needed
+  images: {
+    formats: ["image/avif", "image/webp"],
+  },
 };
 
 export default nextConfig;
