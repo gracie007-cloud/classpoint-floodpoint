@@ -6,16 +6,16 @@ export function Footer() {
     <footer className="text-sm text-muted-foreground">
       Built by{" "}
       <a
-        href="https://github.com/InsanelyAvner"
+        href="https://github.com/avkean"
         target="_blank"
         rel="noopener noreferrer"
         className="text-foreground hover:text-[hsl(var(--fp-sky))] transition-colors duration-150"
       >
-        InsanelyAvner
+        avkean
       </a>
       <span className="mx-2 opacity-30">·</span>
       <a
-        href="https://github.com/InsanelyAvner/floodpoint"
+        href="https://github.com/avkean/floodpoint"
         target="_blank"
         rel="noopener noreferrer"
         className="text-foreground hover:text-[hsl(var(--fp-sky))] transition-colors duration-150"

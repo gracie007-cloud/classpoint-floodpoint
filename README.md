@@ -67,7 +67,7 @@ floodpoint/
 
 ```bash
 # Clone the repository
-git clone https://github.com/InsanelyAvner/floodpoint.git
+git clone https://github.com/avkean/floodpoint.git
 cd floodpoint
 
 # Install dependencies
@@ -127,4 +127,4 @@ GPL-3.0 - See [LICENSE](LICENSE)
 
 ## Author
 
-Built by [InsanelyAvner](https://github.com/InsanelyAvner)
+Built by [avkean](https://github.com/avkean)

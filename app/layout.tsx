@@ -24,8 +24,8 @@ export const metadata: Metadata = {
   description:
     "Create multiple bot connections to ClassPoint sessions with custom usernames. Features include real-time connection monitoring and a class code scanner.",
   keywords: ["ClassPoint", "bot", "SignalR", "WebSocket", "education", "presentation"],
-  authors: [{ name: "InsanelyAvner", url: "https://github.com/InsanelyAvner" }],
-  creator: "InsanelyAvner",
+  authors: [{ name: "avkean", url: "https://github.com/avkean" }],
+  creator: "avkean",
   openGraph: {
     type: "website",
     locale: "en_US",
