@@ -12,17 +12,30 @@ export const VERSION = "2.0.0";
 export const DEFAULT_NAME_PREFIX = "fp-bot";
 
 /**
- * Scanner configuration
+ * Scanner configuration - Parallel Streaming Architecture
+ * Discovery and validation run simultaneously for real-time results
  */
 export const SCANNER_CONFIG = {
   /** Minimum valid class code */
   START_CODE: 10000,
   /** Maximum valid class code */
   END_CODE: 99999,
-  /** Duration to collect WebSocket data before disconnecting (ms) */
-  WEBSOCKET_COLLECT_DURATION: 5000,
   /** Optional domain filter for email collection */
   COLLECT_ONLY_DOMAIN: "",
+  /** Maximum scan duration in milliseconds (30 minutes) */
+  MAX_SCAN_DURATION: 30 * 60 * 1000,
+  
+  // Discovery Pool - Ultra-aggressive API checking
+  /** Number of concurrent API requests (high for fast discovery) */
+  DISCOVERY_CONCURRENCY: 500,
+  /** Timeout for API requests (ms) - aggressive for speed */
+  DISCOVERY_TIMEOUT: 1000,
+  
+  // Validation Pool - Parallel WebSocket validation  
+  /** Number of concurrent WebSocket connections */
+  VALIDATION_CONCURRENCY: 50,
+  /** Maximum wait for WebSocket event (ms) - exits early on event */
+  VALIDATION_TIMEOUT: 1500,
 } as const;
 
 /**

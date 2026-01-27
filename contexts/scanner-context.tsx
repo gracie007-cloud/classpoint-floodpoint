@@ -10,8 +10,10 @@ interface ScannerContextValue {
   message: string | null;
   progress: ScanProgress | null;
   startScan: (start?: number, end?: number) => Promise<void>;
+  resumeScan: () => Promise<void>;
   stopScan: () => Promise<void>;
   clearResults: () => void;
+  canResume: boolean;
 }
 
 const ScannerContext = createContext<ScannerContextValue | null>(null);
@@ -188,13 +190,13 @@ export function ScannerProvider({ children }: ScannerProviderProps) {
         isScanningRef.current = false;
         setIsScanning(false);
         setMessage("Scan stopped.");
-        if (data.progress) {
-          setProgress(data.progress);
-        }
         stopPolling();
         stopHeartbeat();
-        // Fetch final results
-        await fetchResults();
+        
+        // Wait briefly for background workers to finish, then fetch final state
+        setTimeout(async () => {
+          await fetchResults();
+        }, 500);
       } else {
         setMessage(data.message || "No scan was running.");
       }
@@ -206,12 +208,64 @@ export function ScannerProvider({ children }: ScannerProviderProps) {
     }
   }, [isLoading, stopPolling, stopHeartbeat, fetchResults]);
 
-  // Clear results (user action)
-  const clearResults = useCallback(() => {
+   // Clear results (user action)
+  const clearResults = useCallback(async () => {
     setResults([]);
     setMessage(null);
     setProgress(null);
+    
+    // Also clear on server to reset resume state
+    try {
+      await fetch("/api/scanner/clear", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (error) {
+      console.debug("[ScannerContext] Error clearing results:", error);
+    }
   }, []);
+
+  // Resume a stopped scan
+  const resumeScan = useCallback(async () => {
+    if (isLoading || isScanningRef.current) return;
+
+    setIsLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch("/api/scanner/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ resume: true }),
+      });
+
+      const data = await response.json();
+
+      if (response.status === 429) {
+        setMessage(`Too many requests. Please wait ${data.retryAfter || 60} seconds.`);
+        return;
+      }
+
+      if (data.started) {
+        isScanningRef.current = true;
+        setIsScanning(true);
+        setMessage("Resuming scan...");
+        startPolling();
+        startHeartbeat();
+      } else {
+        setMessage(data.message || "Failed to resume scan.");
+      }
+    } catch (error) {
+      console.error("[ScannerContext] Error resuming scan:", error);
+      setMessage("Error resuming scan. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, startPolling, startHeartbeat]);
+
+  // Compute canResume from progress
+  const canResume = progress?.canResume ?? false;
 
   // Check initial state on mount
   useEffect(() => {
@@ -227,19 +281,20 @@ export function ScannerProvider({ children }: ScannerProviderProps) {
         if (response.ok) {
           const data: ScanResultsResponse = await response.json();
           
+          // Always set results and progress for canResume tracking
+          if (data.results && data.results.length > 0) {
+            setResults(data.results);
+          }
+          if (data.progress) {
+            setProgress(data.progress);
+          }
+          
           if (data.isScanning) {
             // Resume scanning state
             isScanningRef.current = true;
             setIsScanning(true);
-            setResults(data.results || []);
-            if (data.progress) {
-              setProgress(data.progress);
-            }
             startPolling();
             startHeartbeat();
-          } else if (data.results && data.results.length > 0) {
-            // Restore previous results (no heartbeat needed - they're just in React state)
-            setResults(data.results);
           }
         }
       } catch (error) {
@@ -264,8 +319,10 @@ export function ScannerProvider({ children }: ScannerProviderProps) {
     message,
     progress,
     startScan,
+    resumeScan,
     stopScan,
     clearResults,
+    canResume,
   };
 
   return (

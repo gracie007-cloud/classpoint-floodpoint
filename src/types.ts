@@ -86,13 +86,29 @@ export interface ScannerConfig {
 }
 
 /**
- * Scan progress information
+ * Scan progress information - extended with two-phase data
  */
 export interface ScanProgress {
   currentCode: number | null;
   scannedCount: number;
   foundCount: number;
   elapsedMs: number | null;
+  /** Total codes in the scan range */
+  totalCodes: number;
+  /** Number of codes remaining to scan */
+  remainingCodes: number;
+  /** Whether the scan can be resumed */
+  canResume: boolean;
+  /** Current scan mode */
+  scanMode: 'new' | 'resume' | null;
+  /** Current scanning phase */
+  phase: 'discovery' | 'validation' | 'complete' | null;
+  /** Number of candidates found in Phase 1 (discovery) */
+  candidateCount: number;
+  /** Number of candidates validated in Phase 2 */
+  validatedCount: number;
+  /** Whether this is a quick scan (no WebSocket validation) */
+  quickScan: boolean;
 }
 
 /**

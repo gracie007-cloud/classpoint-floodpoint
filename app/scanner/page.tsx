@@ -40,7 +40,10 @@ export default function ScannerPage() {
     message,
     progress,
     startScan,
+    resumeScan,
     stopScan,
+    clearResults,
+    canResume,
   } = useScannerContext();
 
   const handleStartScan = async () => {
@@ -51,9 +54,18 @@ export default function ScannerPage() {
     await stopScan();
   };
 
+  const handleResumeScan = async () => {
+    await resumeScan();
+  };
+
+  const handleClearResults = () => {
+    clearResults();
+  };
+
   const isError = message?.includes("Error") || message?.includes("Failed") || message?.includes("Too many");
-  const canStart = !isLoading && !isScanning;
+  const canStart = !isLoading && !isScanning && !canResume;
   const canStop = isScanning && !isLoading;
+  const canClear = !isScanning && (results.length > 0 || canResume);
 
   const totalCodes = SCANNER_CONFIG.END_CODE - SCANNER_CONFIG.START_CODE + 1;
   const progressPercent = progress 
@@ -87,36 +99,65 @@ export default function ScannerPage() {
 
           {/* Actions */}
           <div className="flex gap-3 mb-6">
-            <button
-              type="button"
-              onClick={handleStartScan}
-              disabled={!canStart}
-              className={`flex-1 h-10 rounded-lg text-sm font-medium transition-all duration-150 ${
-                !canStart
-                  ? "bg-secondary text-muted-foreground cursor-not-allowed"
-                  : "bg-[hsl(var(--fp-sky))] text-white hover:bg-[hsl(var(--fp-ocean))]"
-              }`}
-            >
-              {isLoading && !isScanning ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Starting
-                </span>
-              ) : isScanning ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Scanning
-                </span>
-              ) : (
-                "Start Scan"
-              )}
-            </button>
+            {/* Resume button - shown when scan was interrupted */}
+            {canResume && !isScanning && (
+              <button
+                type="button"
+                onClick={handleResumeScan}
+                disabled={isLoading}
+                className={`flex-1 h-10 rounded-lg text-sm font-medium transition-all duration-150 ${
+                  isLoading
+                    ? "bg-secondary text-muted-foreground cursor-not-allowed"
+                    : "bg-[hsl(var(--fp-sky))] text-white hover:bg-[hsl(var(--fp-ocean))]"
+                }`}
+              >
+                {isLoading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Resuming
+                  </span>
+                ) : (
+                  <span>Resume ({progress?.remainingCodes?.toLocaleString()} remaining)</span>
+                )}
+              </button>
+            )}
+
+            {/* Start button - shown when no resumable scan */}
+            {!canResume && (
+              <button
+                type="button"
+                onClick={handleStartScan}
+                disabled={!canStart}
+                className={`flex-1 h-10 rounded-lg text-sm font-medium transition-all duration-150 ${
+                  !canStart
+                    ? "bg-secondary text-muted-foreground cursor-not-allowed"
+                    : "bg-[hsl(var(--fp-sky))] text-white hover:bg-[hsl(var(--fp-ocean))]"
+                }`}
+              >
+                {isLoading && !isScanning ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Starting
+                  </span>
+                ) : isScanning ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Scanning
+                  </span>
+                ) : (
+                  "Start Scan"
+                )}
+              </button>
+            )}
 
             <button
               type="button"
@@ -130,15 +171,60 @@ export default function ScannerPage() {
             >
               Stop
             </button>
+
+            {/* Clear button - clears results and resume state */}
+            <button
+              type="button"
+              onClick={handleClearResults}
+              disabled={!canClear}
+              className={`px-5 h-10 rounded-lg text-sm font-medium border transition-colors duration-150 ${
+                !canClear
+                  ? "border-border text-muted-foreground cursor-not-allowed opacity-50"
+                  : "border-red-500/50 text-red-500 hover:bg-red-500/10"
+              }`}
+            >
+              Clear
+            </button>
           </div>
 
           {/* Progress indicator */}
           {isScanning && progress && (
             <div className="mb-6 space-y-3 animate-fade-in">
+              {/* Parallel streaming status */}
+              <div className="flex items-center justify-center gap-3 text-sm">
+                {/* Discovery status */}
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-2 h-2 rounded-full ${
+                    progress.scannedCount < (progress.totalCodes || totalCodes) 
+                      ? 'bg-[hsl(var(--fp-sky))] animate-pulse' 
+                      : 'bg-[hsl(var(--fp-sky))]/50'
+                  }`} />
+                  <span className="text-muted-foreground">
+                    <span className="font-medium text-[hsl(var(--fp-sky))]">{progress.candidateCount}</span> found
+                  </span>
+                </div>
+                
+                <span className="text-muted-foreground/50">→</span>
+                
+                {/* Validation status */}
+                <div className="flex items-center gap-1.5">
+                  <span className={`inline-block w-2 h-2 rounded-full ${
+                    progress.validatedCount < progress.candidateCount 
+                      ? 'bg-emerald-500 animate-pulse' 
+                      : 'bg-emerald-500/50'
+                  }`} />
+                  <span className="text-muted-foreground">
+                    <span className="font-medium text-emerald-500">{progress.foundCount}</span> active
+                  </span>
+                </div>
+              </div>
+
               {/* Progress bar */}
               <div className="relative h-2 bg-secondary rounded-full overflow-hidden">
                 <div 
-                  className="absolute inset-y-0 left-0 bg-[hsl(var(--fp-sky))] transition-all duration-300"
+                  className={`absolute inset-y-0 left-0 transition-all duration-300 ${
+                    progress.phase === 'validation' ? 'bg-emerald-500' : 'bg-[hsl(var(--fp-sky))]'
+                  }`}
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -146,7 +232,8 @@ export default function ScannerPage() {
               {/* Stats row */}
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>
-                  Scanned: <span className="font-medium text-foreground">{progress.scannedCount.toLocaleString()}</span> / {totalCodes.toLocaleString()}
+                  Scanned: <span className="font-medium text-foreground">{progress.scannedCount.toLocaleString()}</span> / {(progress.totalCodes || totalCodes).toLocaleString()}
+                  {progress.scanMode === 'resume' && <span className="ml-1 text-[hsl(var(--fp-sky))]">(resumed)</span>}
                 </span>
                 <span>
                   {progressPercent}%
@@ -156,7 +243,7 @@ export default function ScannerPage() {
               {/* Additional info */}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
-                  Currently checking: <span className="font-mono text-foreground">{progress.currentCode}</span>
+                  Checking: <span className="font-mono text-foreground">{progress.currentCode}</span>
                 </span>
                 {progress.elapsedMs && (
                   <span className="text-muted-foreground">
@@ -167,11 +254,12 @@ export default function ScannerPage() {
             </div>
           )}
 
-          {/* Found sessions counter */}
+          {/* Live results counter */}
           {isScanning && (
-            <div className="mb-6 p-3 rounded-lg bg-secondary text-center animate-fade-in">
+            <div className="mb-6 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center animate-fade-in">
               <span className="text-sm text-foreground">
-                Found <span className="font-medium text-[hsl(var(--fp-sky))]">{results.length}</span> {results.length === 1 ? "session" : "sessions"}
+                <span className="font-semibold text-emerald-500 text-lg">{results.length}</span>
+                <span className="text-muted-foreground ml-1.5">active {results.length === 1 ? "session" : "sessions"} found</span>
               </span>
             </div>
           )}

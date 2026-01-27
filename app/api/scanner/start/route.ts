@@ -9,6 +9,7 @@ import { scannerRateLimiter, getClientId, rateLimitResponse } from "@/src/lib/ra
 interface StartScanRequest {
   start?: number;
   end?: number;
+  resume?: boolean;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -72,7 +73,9 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     // Start scanning (returns immediately, scan runs in background)
-    const result = await startScanIfNotRunning(sessionId, start, end);
+    const result = await startScanIfNotRunning(sessionId, start, end, {
+      resume: body.resume === true,
+    });
 
     if (!result.started) {
       return NextResponse.json(

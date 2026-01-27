@@ -32,6 +32,14 @@ export async function GET(request: Request): Promise<Response> {
         scannedCount: progress.scannedCount,
         foundCount: progress.foundCount,
         elapsedMs: progress.elapsedMs,
+        totalCodes: progress.totalCodes,
+        remainingCodes: progress.remainingCodes,
+        canResume: progress.canResume,
+        scanMode: progress.scanMode,
+        phase: progress.phase,
+        candidateCount: progress.candidateCount,
+        validatedCount: progress.validatedCount,
+        quickScan: progress.quickScan,
       },
     }, {
       headers: {
