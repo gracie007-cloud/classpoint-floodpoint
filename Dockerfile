@@ -21,14 +21,6 @@ FROM node:24-alpine AS runner
 
 WORKDIR /app
 
-# Step 7.5: Optimize DNS resolution for faster network requests
-# Docker's embedded DNS (127.0.0.11) can be slow under high load
-# Using Google/Cloudflare DNS with short timeouts improves performance
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
-    echo "nameserver 8.8.4.4" >> /etc/resolv.conf && \
-    echo "nameserver 1.1.1.1" >> /etc/resolv.conf && \
-    echo "options timeout:1 attempts:2 rotate" >> /etc/resolv.conf
-
 # Step 8: Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs

@@ -6,6 +6,14 @@ services:
     container_name: floodpoint
     environment:
       - NODE_ENV=production
+    # Optimized DNS servers for faster resolution (bypasses slow Docker DNS)
+    dns:
+      - 8.8.8.8      # Google DNS Primary
+      - 8.8.4.4      # Google DNS Secondary
+      - 1.1.1.1      # Cloudflare DNS
+    dns_opt:
+      - timeout:1
+      - attempts:2
     restart: unless-stopped
     networks:
       - proxy_net
