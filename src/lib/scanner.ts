@@ -9,26 +9,35 @@ import { scannerLogger as logger } from "../logger";
 import axios from "axios";
 import https from "https";
 
-// Dedicated HTTP agent with high connection limit to avoid pool exhaustion
-// Node's default global agent imposes limits that cause timeouts at high concurrency
+// Optimized HTTPS agent for high-throughput scanning with connection reuse
+// Configured to minimize DNS lookups and TLS handshake overhead
 const scannerAgent = new https.Agent({
   keepAlive: true,
-  maxSockets: 1000,
-  timeout: 10000,
-  family: 4 // Force IPv4 to avoid Docker IPv6 issues
+  keepAliveMsecs: 10000,      // Send keep-alive probes every 10s to maintain warm connections
+  maxSockets: 500,             // Reduced from 1000 to work within DNS thread pool limits
+  maxFreeSockets: 256,         // Prevent socket accumulation and memory leaks
+  timeout: 30000,              // Allow time for DNS resolution and TLS handshake on slow networks
+  scheduling: 'lifo',          // LIFO reuses recent sockets (better CPU cache locality)
+  family: 4                    // Force IPv4 to avoid Docker IPv6 dual-stack delays
 });
 
-// Dedicated axios instance for scanner
+// Dedicated axios instance for scanner with optimized settings
 const scannerClient = axios.create({
   httpsAgent: scannerAgent,
-  timeout: 10000, // Increased to 10s for pre-flight/debug (overridden per request)
+  timeout: 8000, // Balanced timeout for both localhost and server
   validateStatus: () => true,
-  headers: { accept: "application/json" }
+  headers: {
+    accept: "application/json",
+    "accept-encoding": "gzip, deflate" // Enable compression to reduce transfer time
+  }
 });
 
 // Pre-flight check state
 let preFlightDone = false;
 let preFlightSuccess = false;
+
+// Adaptive timeout based on measured pre-flight latency
+let adaptiveTimeout = SCANNER_CONFIG.DISCOVERY_TIMEOUT;
 
 // ============================================================================
 // Types
@@ -181,7 +190,17 @@ async function runPreFlightCheck(): Promise<boolean> {
   try {
     // 1. Single request check
     const res1 = await scannerClient.get(API_ENDPOINTS.CLASS_CODE_LOOKUP(10000));
-    logger.warn(`[Pre-flight] Single request: ${res1.status} (${Date.now() - start}ms)`);
+    const preFlightLatency = Date.now() - start;
+    logger.warn(`[Pre-flight] Single request: ${res1.status} (${preFlightLatency}ms)`);
+
+    // Calculate adaptive timeout: 1.5x the pre-flight latency (with optimized agent, less buffer needed)
+    // Cap at 8s to prevent excessive delays even on degraded networks
+    const calculatedTimeout = Math.min(preFlightLatency * 1.5, 8000);
+    adaptiveTimeout = Math.max(
+      SCANNER_CONFIG.DISCOVERY_TIMEOUT,
+      calculatedTimeout
+    );
+    logger.warn(`[Pre-flight] Adaptive timeout set to ${adaptiveTimeout}ms (latency: ${preFlightLatency}ms, config: ${SCANNER_CONFIG.DISCOVERY_TIMEOUT}ms)`);
     
     if (res1.status === 403 || res1.status === 429) {
       logger.error("[Pre-flight] CRITICAL: Server appears to be BLOCKED or Rate Limited (403/429)");
@@ -414,8 +433,8 @@ function logDiscoveryStats() {
 async function checkCode(code: number): Promise<Candidate | null> {
   // Use abort controller for timeout management with Axios
   const controller = new AbortController();
-  // Add a buffer to the timeout to allow axios to timeout first
-  const timeoutId = setTimeout(() => controller.abort(), SCANNER_CONFIG.DISCOVERY_TIMEOUT + 500);
+  // Add a buffer to the timeout, using adaptive timeout based on pre-flight measurements
+  const timeoutId = setTimeout(() => controller.abort(), adaptiveTimeout + 500);
 
   discoveryStats.total++;
 
@@ -503,12 +522,13 @@ async function validateCandidate(candidate: Candidate): Promise<boolean> {
 
   try {
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), SCANNER_CONFIG.DISCOVERY_TIMEOUT);
+    setTimeout(() => controller.abort(), adaptiveTimeout);
     
     const validateResponse = await fetch(validateUrl, {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
       signal: controller.signal,
+      keepalive: true, // Enable connection reuse for validation requests
     });
     
     if (!validateResponse.ok) return false;

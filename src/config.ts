@@ -6,6 +6,11 @@
 export const VERSION = "2.0.0";
 
 /**
+ * Environment detection for configuration defaults
+ */
+const isProduction = process.env.NODE_ENV === 'production';
+
+/**
  * Default name prefix for bot usernames
  * Can be overridden by user input
  */
@@ -25,17 +30,17 @@ export const SCANNER_CONFIG = {
   /** Maximum scan duration in milliseconds (30 minutes) */
   MAX_SCAN_DURATION: 30 * 60 * 1000,
   
-  // Discovery Pool - Optimized for Server Reliability
-  /** Number of concurrent API requests */
-  DISCOVERY_CONCURRENCY: 500,
-  /** Timeout for API requests (ms) - Increase to avoid server-side timeouts */
-  DISCOVERY_TIMEOUT: 2000,
+  // Discovery Pool - Environment-aware for reliability across localhost and server
+  /** Number of concurrent API requests - Optimized for connection pooling efficiency */
+  DISCOVERY_CONCURRENCY: parseInt(process.env.SCANNER_CONCURRENCY ?? '') || (isProduction ? 200 : 500),
+  /** Timeout for API requests (ms) - Adaptive timeout with optimized HTTPS agent */
+  DISCOVERY_TIMEOUT: parseInt(process.env.SCANNER_TIMEOUT ?? '') || (isProduction ? 5000 : 2000),
   
-  // Validation Pool - Parallel WebSocket validation  
+  // Validation Pool - Parallel WebSocket validation
   /** Number of concurrent WebSocket connections */
-  VALIDATION_CONCURRENCY: 40,
+  VALIDATION_CONCURRENCY: parseInt(process.env.VALIDATION_CONCURRENCY ?? '') || 40,
   /** Maximum wait for WebSocket event (ms) - Allow more time for handshake */
-  VALIDATION_TIMEOUT: 5000,
+  VALIDATION_TIMEOUT: parseInt(process.env.VALIDATION_TIMEOUT ?? '') || 5000,
 } as const;
 
 /**
