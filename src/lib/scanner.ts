@@ -308,9 +308,31 @@ class WorkerPool<T> {
 // Discovery - Fast API checking
 // ============================================================================
 
+// Diagnostic counters for debugging
+let discoveryStats = {
+  total: 0,
+  ok: 0,
+  notFound: 0,
+  otherStatus: 0,
+  timeout: 0,
+  networkError: 0,
+  invalidData: 0,
+  lastLogTime: Date.now(),
+};
+
+function logDiscoveryStats() {
+  const now = Date.now();
+  if (now - discoveryStats.lastLogTime > 5000) { // Log every 5 seconds
+    logger.info(`[Discovery Stats] Total: ${discoveryStats.total}, OK: ${discoveryStats.ok}, 404: ${discoveryStats.notFound}, Other: ${discoveryStats.otherStatus}, Timeout: ${discoveryStats.timeout}, NetErr: ${discoveryStats.networkError}, Invalid: ${discoveryStats.invalidData}`);
+    discoveryStats.lastLogTime = now;
+  }
+}
+
 async function checkCode(code: number): Promise<Candidate | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SCANNER_CONFIG.DISCOVERY_TIMEOUT);
+
+  discoveryStats.total++;
 
   try {
     const response = await fetch(API_ENDPOINTS.CLASS_CODE_LOOKUP(code), {
@@ -319,18 +341,61 @@ async function checkCode(code: number): Promise<Candidate | null> {
       signal: controller.signal,
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      if (response.status === 404) {
+        discoveryStats.notFound++;
+      } else {
+        discoveryStats.otherStatus++;
+        // Log unusual status codes
+        if (discoveryStats.otherStatus <= 10) {
+          logger.warn(`[Discovery] Code ${code} returned status ${response.status}`);
+        }
+      }
+      logDiscoveryStats();
+      return null;
+    }
 
+    discoveryStats.ok++;
     const data = await response.json();
     if (data.presenterEmail && data.cpcsRegion) {
+      logDiscoveryStats();
       return { code, presenterEmail: data.presenterEmail, cpcsRegion: data.cpcsRegion };
     }
-  } catch {
-    // Timeout or network error - skip
+    discoveryStats.invalidData++;
+    logDiscoveryStats();
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      discoveryStats.timeout++;
+    } else {
+      discoveryStats.networkError++;
+      // Log first few network errors
+      if (discoveryStats.networkError <= 5) {
+        logger.warn(`[Discovery] Network error for code ${code}:`, error);
+      }
+    }
+    logDiscoveryStats();
   } finally {
     clearTimeout(timeoutId);
   }
   return null;
+}
+
+// Export for debugging
+export function getDiscoveryStats() {
+  return { ...discoveryStats };
+}
+
+export function resetDiscoveryStats() {
+  discoveryStats = {
+    total: 0,
+    ok: 0,
+    notFound: 0,
+    otherStatus: 0,
+    timeout: 0,
+    networkError: 0,
+    invalidData: 0,
+    lastLogTime: Date.now(),
+  };
 }
 
 // ============================================================================
