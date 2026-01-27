@@ -13,13 +13,13 @@ const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
     rules: {
-      // Re-enabled as warnings to catch issues while allowing builds
-      "@typescript-eslint/no-unused-vars": ["warn", { 
+      // Set to error to catch issues at build time
+      "@typescript-eslint/no-unused-vars": ["error", { 
         argsIgnorePattern: "^_",
         varsIgnorePattern: "^_"
       }],
-      "@typescript-eslint/no-explicit-any": "warn",
-      "prefer-const": "warn"
+      "@typescript-eslint/no-explicit-any": "error",
+      "prefer-const": "error"
     }
   }
 ];

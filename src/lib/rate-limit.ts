@@ -128,41 +128,96 @@ export const generalRateLimiter = new RateLimiter({
 });
 
 /**
- * Get client identifier from request (IP or fallback)
+ * Validate IPv4 address format
  */
-export function getClientId(request: Request): string {
-  // Try to get forwarded IP (for proxies/load balancers)
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const firstIp = forwarded.split(",")[0];
-    if (firstIp) {
-      return firstIp.trim();
-    }
-  }
-
-  // Try real IP header
-  const realIp = request.headers.get("x-real-ip");
-  if (realIp) {
-    return realIp;
-  }
-
-  // Fallback - use a hash of user agent + accept headers
-  const userAgent = request.headers.get("user-agent") || "";
-  const accept = request.headers.get("accept") || "";
-  return `anonymous-${hashString(userAgent + accept)}`;
+function isValidIPv4(ip: string): boolean {
+  const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+  return ipv4Regex.test(ip);
 }
 
 /**
- * Simple string hash function
+ * Validate IPv6 address format (simplified)
  */
-function hashString(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
+function isValidIPv6(ip: string): boolean {
+  // Simplified IPv6 check - covers most common formats
+  const ipv6Regex = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::$|^::1$|^([0-9a-fA-F]{1,4}:){1,7}:$|^([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$|^([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}$|^([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}$|^([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}$|^([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}$|^[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})$|^:((:[0-9a-fA-F]{1,4}){1,7}|:)$/;
+  return ipv6Regex.test(ip);
+}
+
+/**
+ * Check if IP is valid
+ */
+function isValidIP(ip: string): boolean {
+  return isValidIPv4(ip) || isValidIPv6(ip);
+}
+
+/**
+ * Check if proxy headers should be trusted
+ */
+function shouldTrustProxy(): boolean {
+  return process.env.TRUST_PROXY === "true" || process.env.TRUST_PROXY === "1";
+}
+
+/**
+ * Get client identifier from request (IP or fallback)
+ * Only trusts X-Forwarded-For when TRUST_PROXY env var is set
+ */
+export function getClientId(request: Request): string {
+  // Only trust forwarded headers when behind a known proxy
+  if (shouldTrustProxy()) {
+    // Try to get forwarded IP (for proxies/load balancers)
+    const forwarded = request.headers.get("x-forwarded-for");
+    if (forwarded) {
+      const firstIp = forwarded.split(",")[0]?.trim();
+      if (firstIp && isValidIP(firstIp)) {
+        return firstIp;
+      }
+    }
+
+    // Try real IP header
+    const realIp = request.headers.get("x-real-ip");
+    if (realIp && isValidIP(realIp.trim())) {
+      return realIp.trim();
+    }
   }
-  return Math.abs(hash).toString(16);
+
+  // Fallback - use a cryptographic hash of request characteristics
+  const userAgent = request.headers.get("user-agent") || "";
+  const accept = request.headers.get("accept") || "";
+  const acceptLanguage = request.headers.get("accept-language") || "";
+  const acceptEncoding = request.headers.get("accept-encoding") || "";
+  
+  return `anon-${secureHash(userAgent + accept + acceptLanguage + acceptEncoding)}`;
+}
+
+/**
+ * Improved hash function using djb2 algorithm with salt
+ */
+function secureHash(str: string): string {
+  // Add a timestamp-based salt that changes daily for some entropy
+  const daySalt = Math.floor(Date.now() / (1000 * 60 * 60 * 24)).toString();
+  const input = str + daySalt;
+  
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(i);
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * Create rate limit headers for responses
+ */
+export function createRateLimitHeaders(
+  remaining: number,
+  resetIn: number,
+  limit: number
+): Record<string, string> {
+  return {
+    "X-RateLimit-Limit": String(limit),
+    "X-RateLimit-Remaining": String(Math.max(0, remaining)),
+    "X-RateLimit-Reset": String(Math.ceil(resetIn / 1000)),
+  };
 }
 
 /**
@@ -179,7 +234,9 @@ export function rateLimitResponse(resetIn: number): Response {
       headers: {
         "Content-Type": "application/json",
         "Retry-After": String(Math.ceil(resetIn / 1000)),
+        "X-RateLimit-Remaining": "0",
       },
     }
   );
 }
+

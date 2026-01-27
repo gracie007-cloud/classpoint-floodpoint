@@ -3,15 +3,27 @@
 import { NextResponse } from "next/server";
 import { stopScan, isScanning, getScanProgress } from "@/src/lib/scanner";
 import { getSessionIdFromRequest } from "@/src/lib/session";
+import { generalRateLimiter, getClientId, rateLimitResponse, createRateLimitHeaders } from "@/src/lib/rate-limit";
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    // Rate limiting check
+    const clientId = getClientId(request);
+    const rateCheck = generalRateLimiter.check(clientId);
+
+    if (!rateCheck.allowed) {
+      return rateLimitResponse(rateCheck.resetIn);
+    }
+
     const sessionId = await getSessionIdFromRequest(request);
 
     if (!isScanning(sessionId)) {
       return NextResponse.json(
-        { stopped: false, message: "No scan is currently running for this session." },
-        { status: 400 }
+        { error: "No scan is currently running for this session." },
+        { 
+          status: 400,
+          headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 100),
+        }
       );
     }
 
@@ -19,8 +31,11 @@ export async function POST(request: Request): Promise<Response> {
 
     if (!result.stopped) {
       return NextResponse.json(
-        { stopped: false, message: result.error || "Failed to stop scan." },
-        { status: 400 }
+        { error: result.error || "Failed to stop scan." },
+        { 
+          status: 400,
+          headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 100),
+        }
       );
     }
 
@@ -31,12 +46,15 @@ export async function POST(request: Request): Promise<Response> {
       stopped: true,
       message: "Scan stop signal sent.",
       progress,
+    }, {
+      headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 100),
     });
   } catch (error) {
     console.error("[API] Scanner stop error:", error);
     return NextResponse.json(
-      { stopped: false, message: "Internal server error." },
+      { error: "Internal server error." },
       { status: 500 }
     );
   }
 }
+

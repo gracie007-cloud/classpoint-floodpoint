@@ -21,17 +21,28 @@ FROM node:24-alpine AS runner
 
 WORKDIR /app
 
-# Step 8: Copy the built app and necessary files from the builder
+# Step 8: Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Step 9: Copy the built app and necessary files from the builder
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/public ./public
 
-# Step 9: Set environment variable to production
+# Step 10: Set correct permissions
+RUN chown -R nextjs:nodejs /app
+
+# Step 11: Switch to non-root user
+USER nextjs
+
+# Step 12: Set environment variable to production
 ENV NODE_ENV=production
 
-# Step 10: Expose the port the app runs on
+# Step 13: Expose the port the app runs on
 EXPOSE 3000
 
-# Step 11: Command to run the app
+# Step 14: Command to run the app
 CMD ["npm", "run", "start"]
+

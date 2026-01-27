@@ -3,26 +3,27 @@
 import { NextResponse } from "next/server";
 import { getFoundCodes, getScanProgress, updateHeartbeat } from "@/src/lib/scanner";
 import { getSessionIdFromRequest } from "@/src/lib/session";
+import { generalRateLimiter, getClientId, rateLimitResponse, createRateLimitHeaders } from "@/src/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    const sessionId = await getSessionIdFromRequest(request);
-    
-    // Debug log
-    const progress = getScanProgress(sessionId);
-    if (!progress.isScanning && Math.random() < 0.1) {
-       console.log(`[API] Results poll for ${sessionId.substring(0, 8)}... - Scanning: ${progress.isScanning}, Found: ${progress.foundCount}`);
-    } else if (progress.isScanning) {
-       console.log(`[API] Results poll for ${sessionId.substring(0, 8)}... - Scanning: ${progress.isScanning}, Found: ${progress.foundCount}`);
+    // Rate limiting check
+    const clientId = getClientId(request);
+    const rateCheck = generalRateLimiter.check(clientId);
+
+    if (!rateCheck.allowed) {
+      return rateLimitResponse(rateCheck.resetIn);
     }
+
+    const sessionId = await getSessionIdFromRequest(request);
 
     // Update heartbeat to keep scan alive as long as user is polling results
     updateHeartbeat(sessionId);
     
     const results = getFoundCodes(sessionId);
-
+    const progress = getScanProgress(sessionId);
 
     return NextResponse.json({
       results,
@@ -46,14 +47,16 @@ export async function GET(request: Request): Promise<Response> {
         "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
         "Pragma": "no-cache",
         "Expires": "0",
+        ...createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 100),
       }
     });
   } catch (error) {
     console.error("[API] Scanner results error:", error);
     return NextResponse.json(
-      { results: [], isScanning: false, message: "Internal server error." },
+      { results: [], isScanning: false, error: "Internal server error." },
       { status: 500 }
     );
   }
 }
+
 

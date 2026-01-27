@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { lookupClassCode } from "@/src/lib/classpoint";
-import { lookupRateLimiter, getClientId, rateLimitResponse } from "@/src/lib/rate-limit";
+import { lookupRateLimiter, getClientId, rateLimitResponse, createRateLimitHeaders } from "@/src/lib/rate-limit";
 import { validateClassCode } from "@/src/config";
 
 export async function GET(request: Request): Promise<Response> {
@@ -23,7 +23,7 @@ export async function GET(request: Request): Promise<Response> {
     if (!validation.valid) {
       return NextResponse.json(
         { error: validation.error || "Invalid class code" },
-        { status: 400 }
+        { status: 400, headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 60) }
       );
     }
 
@@ -35,7 +35,7 @@ export async function GET(request: Request): Promise<Response> {
     if (!classInfo) {
       return NextResponse.json(
         { error: "Class not found or invalid code" },
-        { status: 404 }
+        { status: 404, headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 60) }
       );
     }
 
@@ -45,6 +45,7 @@ export async function GET(request: Request): Promise<Response> {
         "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
         "Pragma": "no-cache",
         "Expires": "0",
+        ...createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 60),
       }
     });
   } catch (error) {

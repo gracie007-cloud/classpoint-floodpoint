@@ -1,0 +1,6 @@
+# Floodpoint robots.txt
+# Prevent web crawlers from indexing API routes
+
+User-agent: *
+Allow: /
+Disallow: /api/

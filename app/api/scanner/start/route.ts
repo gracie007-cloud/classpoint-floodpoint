@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { startScanIfNotRunning, isScanning, getScanProgress } from "@/src/lib/scanner";
 import { SCANNER_CONFIG } from "@/src/config";
 import { getSessionIdFromRequest } from "@/src/lib/session";
-import { scannerRateLimiter, getClientId, rateLimitResponse } from "@/src/lib/rate-limit";
+import { scannerRateLimiter, getClientId, rateLimitResponse, createRateLimitHeaders } from "@/src/lib/rate-limit";
 
 interface StartScanRequest {
   start?: number;
@@ -34,7 +34,7 @@ export async function POST(request: Request): Promise<Response> {
           message: "A scan is already in progress for this session.",
           progress,
         },
-        { status: 409 }
+        { status: 409, headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 5) }
       );
     }
 
@@ -68,7 +68,7 @@ export async function POST(request: Request): Promise<Response> {
           started: false,
           message: "Start code must be less than or equal to end code.",
         },
-        { status: 400 }
+        { status: 400, headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 5) }
       );
     }
 
@@ -80,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!result.started) {
       return NextResponse.json(
         { started: false, message: result.error || "Failed to start scan." },
-        { status: 400 }
+        { status: 400, headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 5) }
       );
     }
 
@@ -89,6 +89,8 @@ export async function POST(request: Request): Promise<Response> {
       message: `Scan initiated for codes ${start} to ${end}.`,
       range: { start, end },
       totalCodes: end - start + 1,
+    }, {
+      headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 5),
     });
   } catch (error) {
     console.error("[API] Scanner start error:", error);

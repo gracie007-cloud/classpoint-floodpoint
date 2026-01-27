@@ -1,7 +1,8 @@
-// src/lib/session.ts - Session management utilities
+// src/lib/session.ts - Session management utilities with signed cookies
 
 import { cookies } from "next/headers";
 import { v4 as uuidv4 } from "uuid";
+import { createHmac } from "crypto";
 
 /**
  * Session cookie name
@@ -14,6 +15,60 @@ const SESSION_COOKIE_NAME = "fp_session";
 const SESSION_COOKIE_MAX_AGE = 24 * 60 * 60;
 
 /**
+ * Get session secret from environment or use fallback for development
+ */
+function getSessionSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") {
+    console.warn("[Session] SESSION_SECRET not set in production!");
+  }
+  return secret || "dev-fallback-secret-change-in-production";
+}
+
+/**
+ * Sign a session ID using HMAC-SHA256
+ */
+function signSessionId(sessionId: string): string {
+  const hmac = createHmac("sha256", getSessionSecret());
+  hmac.update(sessionId);
+  const signature = hmac.digest("hex").slice(0, 16); // Use first 16 chars for brevity
+  return `${sessionId}.${signature}`;
+}
+
+/**
+ * Verify and extract session ID from signed value
+ */
+function verifyAndExtractSessionId(signedValue: string): string | null {
+  const parts = signedValue.split(".");
+  if (parts.length !== 2) {
+    return null;
+  }
+  
+  const [sessionId, providedSignature] = parts;
+  if (!sessionId || !providedSignature) {
+    return null;
+  }
+  
+  const hmac = createHmac("sha256", getSessionSecret());
+  hmac.update(sessionId);
+  const expectedSignature = hmac.digest("hex").slice(0, 16);
+  
+  // Constant-time comparison to prevent timing attacks
+  if (providedSignature.length !== expectedSignature.length) {
+    return null;
+  }
+  
+  let isValid = true;
+  for (let i = 0; i < providedSignature.length; i++) {
+    if (providedSignature[i] !== expectedSignature[i]) {
+      isValid = false;
+    }
+  }
+  
+  return isValid ? sessionId : null;
+}
+
+/**
  * Get or create a session ID from cookies
  * This function must be called from a Server Component or API Route
  */
@@ -22,16 +77,17 @@ export async function getOrCreateSessionId(): Promise<string> {
   const existingSession = cookieStore.get(SESSION_COOKIE_NAME);
   
   if (existingSession?.value) {
-    // Validate that it looks like a UUID
-    if (isValidSessionId(existingSession.value)) {
-      return existingSession.value;
+    const sessionId = verifyAndExtractSessionId(existingSession.value);
+    if (sessionId && isValidSessionId(sessionId)) {
+      return sessionId;
     }
   }
   
   // Generate new session ID
   const newSessionId = uuidv4();
+  const signedSessionId = signSessionId(newSessionId);
   
-  cookieStore.set(SESSION_COOKIE_NAME, newSessionId, {
+  cookieStore.set(SESSION_COOKIE_NAME, signedSessionId, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
@@ -50,10 +106,13 @@ export async function getSessionIdFromRequest(request: Request): Promise<string>
   // Try to get from cookie header
   const cookieHeader = request.headers.get("cookie");
   if (cookieHeader) {
-    const cookies = parseCookies(cookieHeader);
-    const sessionId = cookies[SESSION_COOKIE_NAME];
-    if (sessionId && isValidSessionId(sessionId)) {
-      return sessionId;
+    const parsedCookies = parseCookies(cookieHeader);
+    const signedValue = parsedCookies[SESSION_COOKIE_NAME];
+    if (signedValue) {
+      const sessionId = verifyAndExtractSessionId(signedValue);
+      if (sessionId && isValidSessionId(sessionId)) {
+        return sessionId;
+      }
     }
   }
   
@@ -61,13 +120,17 @@ export async function getSessionIdFromRequest(request: Request): Promise<string>
   try {
     const cookieStore = await cookies();
     const existingSession = cookieStore.get(SESSION_COOKIE_NAME);
-    if (existingSession?.value && isValidSessionId(existingSession.value)) {
-      return existingSession.value;
+    if (existingSession?.value) {
+      const sessionId = verifyAndExtractSessionId(existingSession.value);
+      if (sessionId && isValidSessionId(sessionId)) {
+        return sessionId;
+      }
     }
     
     // Create a new session
     const newSessionId = uuidv4();
-    cookieStore.set(SESSION_COOKIE_NAME, newSessionId, {
+    const signedSessionId = signSessionId(newSessionId);
+    cookieStore.set(SESSION_COOKIE_NAME, signedSessionId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
@@ -96,22 +159,24 @@ function isValidSessionId(id: string): boolean {
  * Parse cookie header string into key-value object
  */
 function parseCookies(cookieHeader: string): Record<string, string> {
-  const cookies: Record<string, string> = {};
+  const result: Record<string, string> = {};
   
   cookieHeader.split(";").forEach((cookie) => {
     const [key, ...valueParts] = cookie.trim().split("=");
     if (key && valueParts.length > 0) {
-      cookies[key.trim()] = valueParts.join("=").trim();
+      result[key.trim()] = valueParts.join("=").trim();
     }
   });
   
-  return cookies;
+  return result;
 }
 
 /**
  * Create a session ID response header
  */
 export function createSessionCookie(sessionId: string): string {
+  const signedSessionId = signSessionId(sessionId);
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; SameSite=Strict; Max-Age=${SESSION_COOKIE_MAX_AGE}; Path=/${secure}`;
+  return `${SESSION_COOKIE_NAME}=${signedSessionId}; HttpOnly; SameSite=Strict; Max-Age=${SESSION_COOKIE_MAX_AGE}; Path=/${secure}`;
 }
+

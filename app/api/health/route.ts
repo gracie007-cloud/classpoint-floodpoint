@@ -1,40 +1,35 @@
 // app/api/health/route.ts - Health check endpoint for monitoring
 
 import { NextResponse } from "next/server";
-import { getActiveSessionCount, getScanningSessionCount } from "@/src/lib/scanner";
 import { VERSION } from "@/src/config";
+import { generalRateLimiter, getClientId, rateLimitResponse, createRateLimitHeaders } from "@/src/lib/rate-limit";
 
 interface HealthResponse {
   status: "healthy" | "degraded" | "unhealthy";
   version: string;
   timestamp: string;
-  uptime: number;
-  metrics: {
-    activeSessions: number;
-    scanningSessions: number;
-  };
 }
 
-// Track server start time
-const startTime = Date.now();
-
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   try {
-    const activeSessions = getActiveSessionCount();
-    const scanningSessions = getScanningSessionCount();
+    // Rate limiting check
+    const clientId = getClientId(request);
+    const rateCheck = generalRateLimiter.check(clientId);
 
+    if (!rateCheck.allowed) {
+      return rateLimitResponse(rateCheck.resetIn);
+    }
+
+    // Return minimal health info - no internal metrics exposed publicly
     const response: HealthResponse = {
       status: "healthy",
       version: VERSION,
       timestamp: new Date().toISOString(),
-      uptime: Date.now() - startTime,
-      metrics: {
-        activeSessions,
-        scanningSessions,
-      },
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(response, {
+      headers: createRateLimitHeaders(rateCheck.remaining, rateCheck.resetIn, 100),
+    });
   } catch (error) {
     console.error("[API] Health check error:", error);
     return NextResponse.json(
@@ -48,3 +43,4 @@ export async function GET(): Promise<Response> {
     );
   }
 }
+
