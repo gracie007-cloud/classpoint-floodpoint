@@ -13,17 +13,22 @@ import https from "https";
 // Node's default global agent imposes limits that cause timeouts at high concurrency
 const scannerAgent = new https.Agent({
   keepAlive: true,
-  maxSockets: 1000, // Allow 1000 concurrent sockets
+  maxSockets: 1000,
   timeout: 10000,
+  family: 4 // Force IPv4 to avoid Docker IPv6 issues
 });
 
 // Dedicated axios instance for scanner
 const scannerClient = axios.create({
   httpsAgent: scannerAgent,
-  timeout: SCANNER_CONFIG.DISCOVERY_TIMEOUT,
-  validateStatus: () => true, // Don't throw on 404
+  timeout: 10000, // Increased to 10s for pre-flight/debug (overridden per request)
+  validateStatus: () => true,
   headers: { accept: "application/json" }
 });
+
+// Pre-flight check state
+let preFlightDone = false;
+let preFlightSuccess = false;
 
 // ============================================================================
 // Types
@@ -162,6 +167,65 @@ export function clearFoundCodes(sessionId: string): void {
 export function isScanning(sessionId: string): boolean {
   return getSession(sessionId)?.scanning ?? false;
 }
+
+// ============================================================================
+// Pre-flight Check
+// ============================================================================
+
+async function runPreFlightCheck(): Promise<boolean> {
+  if (preFlightDone) return preFlightSuccess;
+  
+  logger.warn("[Pre-flight] Starting connectivity check...");
+  const start = Date.now();
+  
+  try {
+    // 1. Single request check
+    const res1 = await scannerClient.get(API_ENDPOINTS.CLASS_CODE_LOOKUP(10000));
+    logger.warn(`[Pre-flight] Single request: ${res1.status} (${Date.now() - start}ms)`);
+    
+    if (res1.status === 403 || res1.status === 429) {
+      logger.error("[Pre-flight] CRITICAL: Server appears to be BLOCKED or Rate Limited (403/429)");
+      preFlightDone = true;
+      preFlightSuccess = false;
+      return false;
+    }
+    
+    // 2. Small burst check (5 requests)
+    const burstStart = Date.now();
+    const promises = [10001, 10002, 10003, 10004, 10005].map(c => 
+      scannerClient.get(API_ENDPOINTS.CLASS_CODE_LOOKUP(c))
+        .then(r => r.status)
+        .catch(_ => "ERR")
+    );
+    
+    const results = await Promise.all(promises);
+    logger.warn(`[Pre-flight] Burst results: ${results.join(",")} (${Date.now() - burstStart}ms)`);
+    
+    // If all failed, we are blocked
+    if (results.every(r => r === "ERR")) {
+      logger.error("[Pre-flight] CRITICAL: All burst requests failed. Network connectivity issue suspected.");
+      preFlightDone = true;
+      preFlightSuccess = false;
+      return false;
+    }
+
+    logger.warn("[Pre-flight] Check PASSED. Network is healthy.");
+    preFlightDone = true;
+    preFlightSuccess = true;
+    return true;
+
+  } catch (error) {
+    logger.error(`[Pre-flight] Check FAILED: ${error instanceof Error ? error.message : String(error)}`);
+    if (axios.isAxiosError(error)) {
+       logger.error(`[Pre-flight] Axios code: ${error.code}, Phase: ${error.response ? 'Response' : 'Connect/DNS'}`);
+    }
+    preFlightDone = true;
+    preFlightSuccess = false;
+    return false;
+  }
+}
+
+
 
 export function getScanProgress(sessionId: string) {
   const session = getSession(sessionId);
@@ -528,6 +592,12 @@ export async function startScanIfNotRunning(
   end: number = SCANNER_CONFIG.END_CODE,
   options: { resume?: boolean } = {}
 ): Promise<{ started: boolean; error?: string }> {
+  // Run network diagnostics first
+  const isHealthy = await runPreFlightCheck();
+  if (!isHealthy) {
+     return { started: false, error: "Network check FAILED. Server appears blocked or has no connectivity. Check logs." };
+  }
+
   const session = getOrCreateSession(sessionId);
 
   if (session.scanning) {
