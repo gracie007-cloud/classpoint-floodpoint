@@ -66,8 +66,6 @@ interface SessionScannerState {
   // Parallel streaming tracking
   candidateCount: number;
   validatedCount: number;
-  // Candidate queue for parallel processing
-  candidateQueue: Candidate[];
   validationActive: boolean;
 }
 
@@ -105,7 +103,6 @@ function createEmptySession(): SessionScannerState {
     totalCodes: 0,
     candidateCount: 0,
     validatedCount: 0,
-    candidateQueue: [],
     validationActive: false,
   };
 }
@@ -165,7 +162,6 @@ export function clearFoundCodes(sessionId: string): void {
   if (session) {
     session.foundCodes = [];
     session.remainingCodes = [];
-    session.candidateQueue = [];
     session.candidateCount = 0;
     session.validatedCount = 0;
     session.scanMode = null;
@@ -219,7 +215,7 @@ async function runPreFlightCheck(): Promise<boolean> {
     
     const results = await Promise.all(promises);
     logger.warn(`[Pre-flight] Burst results: ${results.join(",")} (${Date.now() - burstStart}ms)`);
-    
+
     // If all failed, we are blocked
     if (results.every(r => r === "ERR")) {
       logger.error("[Pre-flight] CRITICAL: All burst requests failed. Network connectivity issue suspected.");
@@ -227,6 +223,24 @@ async function runPreFlightCheck(): Promise<boolean> {
       preFlightSuccess = false;
       return false;
     }
+
+    // Pre-warm connection pool for faster scan startup
+    logger.warn("[Pre-flight] Pre-warming connection pool...");
+    const warmupStart = Date.now();
+    const warmupPromises = [];
+
+    // Pre-warm with ~50 concurrent requests to establish socket pool
+    const warmupCodes = Array.from({ length: 50 }, (_, i) => 10100 + i);
+    for (const code of warmupCodes) {
+      warmupPromises.push(
+        scannerClient.get(API_ENDPOINTS.CLASS_CODE_LOOKUP(code))
+          .catch(() => null) // Ignore results, just warming sockets
+      );
+    }
+
+    await Promise.all(warmupPromises);
+    const warmupTime = Date.now() - warmupStart;
+    logger.warn(`[Pre-flight] Pool pre-warmed with 50 connections in ${warmupTime}ms`);
 
     logger.warn("[Pre-flight] Check PASSED. Network is healthy.");
     preFlightDone = true;
@@ -335,6 +349,7 @@ export function disposeScanner(): void {
 
 class WorkerPool<T> {
   private queue: T[] = [];
+  private queueHead = 0; // Track position instead of shifting (O(1) vs O(n))
   private activeCount = 0;
   private readonly concurrency: number;
   private readonly processor: (item: T) => Promise<void>;
@@ -354,20 +369,31 @@ class WorkerPool<T> {
 
   pushMany(items: T[]): void {
     if (this.stopped) return;
+    const wasEmpty = this.queueHead >= this.queue.length;
     this.queue.push(...items);
-    // Start multiple workers immediately
-    for (let i = 0; i < Math.min(items.length, this.concurrency); i++) {
-      this.tryProcess();
+
+    // Start workers efficiently - avoid redundant calls
+    if (wasEmpty) {
+      const workersToStart = Math.min(this.concurrency - this.activeCount, items.length);
+      for (let i = 0; i < workersToStart; i++) {
+        setImmediate(() => this.tryProcess());
+      }
     }
   }
 
   private async tryProcess(): Promise<void> {
-    if (this.stopped || this.activeCount >= this.concurrency || this.queue.length === 0) {
+    if (this.stopped || this.activeCount >= this.concurrency || this.queueHead >= this.queue.length) {
       return;
     }
 
-    const item = this.queue.shift();
+    const item = this.queue[this.queueHead++]; // O(1) array access instead of shift
     if (!item) return;
+
+    // Periodically reset queue to prevent unbounded growth
+    if (this.queueHead > 1000 && this.queueHead >= this.queue.length) {
+      this.queue = [];
+      this.queueHead = 0;
+    }
 
     this.activeCount++;
     try {
@@ -379,7 +405,7 @@ class WorkerPool<T> {
       // Immediately try next
       this.tryProcess();
       // Check if drained
-      if (this.activeCount === 0 && this.queue.length === 0 && this.drainResolver) {
+      if (this.activeCount === 0 && this.queueHead >= this.queue.length && this.drainResolver) {
         this.drainResolver();
         this.drainResolver = null;
       }
@@ -387,17 +413,18 @@ class WorkerPool<T> {
   }
 
   async drain(): Promise<void> {
-    if (this.activeCount === 0 && this.queue.length === 0) return;
+    if (this.activeCount === 0 && this.queueHead >= this.queue.length) return;
     return new Promise(resolve => { this.drainResolver = resolve; });
   }
 
   stop(): void {
     this.stopped = true;
-    this.queue = [];
+    this.queue = []; // Clear for GC
+    this.queueHead = 0;
   }
 
   get pending(): number {
-    return this.queue.length;
+    return Math.max(0, this.queue.length - this.queueHead);
   }
 
   get active(): number {
@@ -421,6 +448,62 @@ let discoveryStats = {
   lastLogTime: Date.now(),
 };
 
+// Early termination detector for negative signals
+class NegativeSignalDetector {
+  private consecutiveTimeouts = 0;
+  private consecutiveNetErrors = 0;
+  private rateLimitCount = 0;
+  private readonly timeoutThreshold = 30; // After 30 consecutive timeouts
+  private readonly netErrorThreshold = 15; // After 15 consecutive network errors
+  private readonly rateLimitThreshold = 5; // After 5 rate limits
+
+  recordTimeout(): boolean {
+    this.consecutiveNetErrors = 0;
+    this.consecutiveTimeouts++;
+
+    if (this.consecutiveTimeouts >= this.timeoutThreshold) {
+      logger.error(`[NegativeSignal] ${this.consecutiveTimeouts} consecutive timeouts - network appears degraded`);
+      return true; // Signal to abort
+    }
+    return false;
+  }
+
+  recordNetError(): boolean {
+    this.consecutiveTimeouts = 0;
+    this.consecutiveNetErrors++;
+
+    if (this.consecutiveNetErrors >= this.netErrorThreshold) {
+      logger.error(`[NegativeSignal] ${this.consecutiveNetErrors} consecutive network errors - connectivity issue`);
+      return true; // Signal to abort
+    }
+    return false;
+  }
+
+  recordRateLimit(): boolean {
+    this.rateLimitCount++;
+
+    if (this.rateLimitCount >= this.rateLimitThreshold) {
+      logger.error(`[NegativeSignal] ${this.rateLimitCount} rate limit responses - being throttled`);
+      return true; // Signal to abort
+    }
+    return false;
+  }
+
+  recordSuccess(): void {
+    this.consecutiveTimeouts = 0;
+    this.consecutiveNetErrors = 0;
+    // Don't reset rate limit count - it persists across successes
+  }
+
+  shouldAbort(): boolean {
+    return this.consecutiveTimeouts >= this.timeoutThreshold ||
+           this.consecutiveNetErrors >= this.netErrorThreshold ||
+           this.rateLimitCount >= this.rateLimitThreshold;
+  }
+}
+
+const negativeSignalDetector = new NegativeSignalDetector();
+
 function logDiscoveryStats() {
   const now = Date.now();
   if (now - discoveryStats.lastLogTime > 5000) { // Log every 5 seconds
@@ -443,9 +526,21 @@ async function checkCode(code: number): Promise<Candidate | null> {
       signal: controller.signal
     });
 
+    // Check for rate limiting
+    if (response.status === 429 || response.status === 403) {
+      discoveryStats.otherStatus++;
+      const shouldAbort = negativeSignalDetector.recordRateLimit();
+      if (shouldAbort) {
+        logger.error(`[Discovery] Rate limit threshold exceeded - aborting scan`);
+      }
+      logDiscoveryStats();
+      return null;
+    }
+
     if (response.status !== 200) {
       if (response.status === 404) {
         discoveryStats.notFound++;
+        negativeSignalDetector.recordSuccess(); // 404 is expected, not a failure
       } else {
         discoveryStats.otherStatus++;
         // Log unusual status codes
@@ -458,6 +553,7 @@ async function checkCode(code: number): Promise<Candidate | null> {
     }
 
     discoveryStats.ok++;
+    negativeSignalDetector.recordSuccess();
     const data = response.data;
     if (data.presenterEmail && data.cpcsRegion) {
       logDiscoveryStats();
@@ -468,8 +564,16 @@ async function checkCode(code: number): Promise<Candidate | null> {
   } catch (error) {
     if (axios.isCancel(error) || (error instanceof Error && error.name === "AbortError") || (axios.isAxiosError(error) && error.code === 'ECONNABORTED')) {
       discoveryStats.timeout++;
+      const shouldAbort = negativeSignalDetector.recordTimeout();
+      if (shouldAbort) {
+        logger.error(`[Discovery] Timeout threshold exceeded - network appears severely degraded`);
+      }
     } else {
       discoveryStats.networkError++;
+      const shouldAbort = negativeSignalDetector.recordNetError();
+      if (shouldAbort) {
+        logger.error(`[Discovery] Network error threshold exceeded - connectivity problems detected`);
+      }
       // Log first few network errors
       if (discoveryStats.networkError <= 5) {
         logger.warn(`[Discovery] Network error for code ${code}:`, error);
@@ -498,6 +602,8 @@ export function resetDiscoveryStats() {
     invalidData: 0,
     lastLogTime: Date.now(),
   };
+  // Reset negative signal detector
+  negativeSignalDetector.recordSuccess();
 }
 
 // ============================================================================
@@ -639,7 +745,6 @@ export async function startScanIfNotRunning(
     for (let code = start; code <= end; code++) allCodes.push(code);
     codesToScan = shuffleArray(allCodes);
     session.foundCodes = [];
-    session.candidateQueue = [];
     session.candidateCount = 0;
     session.validatedCount = 0;
     session.scanMode = 'new';

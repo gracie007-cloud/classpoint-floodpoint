@@ -32,13 +32,13 @@ export const SCANNER_CONFIG = {
   
   // Discovery Pool - Environment-aware for reliability across localhost and server
   /** Number of concurrent API requests - Optimized for connection pooling efficiency */
-  DISCOVERY_CONCURRENCY: parseInt(process.env.SCANNER_CONCURRENCY ?? '') || (isProduction ? 200 : 500),
+  DISCOVERY_CONCURRENCY: parseInt(process.env.SCANNER_CONCURRENCY ?? '') || (isProduction ? 250 : 500),
   /** Timeout for API requests (ms) - Adaptive timeout with optimized HTTPS agent */
   DISCOVERY_TIMEOUT: parseInt(process.env.SCANNER_TIMEOUT ?? '') || (isProduction ? 5000 : 2000),
-  
-  // Validation Pool - Parallel WebSocket validation
-  /** Number of concurrent WebSocket connections */
-  VALIDATION_CONCURRENCY: parseInt(process.env.VALIDATION_CONCURRENCY ?? '') || 40,
+
+  // Validation Pool - Parallel WebSocket validation (increased - WebSocket is I/O bound)
+  /** Number of concurrent WebSocket connections - Higher since async I/O bound */
+  VALIDATION_CONCURRENCY: parseInt(process.env.VALIDATION_CONCURRENCY ?? '') || 60,
   /** Maximum wait for WebSocket event (ms) - Allow more time for handshake */
   VALIDATION_TIMEOUT: parseInt(process.env.VALIDATION_TIMEOUT ?? '') || 5000,
 } as const;
