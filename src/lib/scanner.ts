@@ -6,6 +6,24 @@ import type { ValidClassCode, SendJoinClassPayload } from "../types";
 import { generateUsername, generateParticipantId } from "../utils";
 import { SCANNER_CONFIG, API_ENDPOINTS, DEFAULT_NAME_PREFIX } from "../config";
 import { scannerLogger as logger } from "../logger";
+import axios from "axios";
+import https from "https";
+
+// Dedicated HTTP agent with high connection limit to avoid pool exhaustion
+// Node's default global agent imposes limits that cause timeouts at high concurrency
+const scannerAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 1000, // Allow 1000 concurrent sockets
+  timeout: 10000,
+});
+
+// Dedicated axios instance for scanner
+const scannerClient = axios.create({
+  httpsAgent: scannerAgent,
+  timeout: SCANNER_CONFIG.DISCOVERY_TIMEOUT,
+  validateStatus: () => true, // Don't throw on 404
+  headers: { accept: "application/json" }
+});
 
 // ============================================================================
 // Types
@@ -330,19 +348,19 @@ function logDiscoveryStats() {
 }
 
 async function checkCode(code: number): Promise<Candidate | null> {
+  // Use abort controller for timeout management with Axios
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), SCANNER_CONFIG.DISCOVERY_TIMEOUT);
+  // Add a buffer to the timeout to allow axios to timeout first
+  const timeoutId = setTimeout(() => controller.abort(), SCANNER_CONFIG.DISCOVERY_TIMEOUT + 500);
 
   discoveryStats.total++;
 
   try {
-    const response = await fetch(API_ENDPOINTS.CLASS_CODE_LOOKUP(code), {
-      method: "GET",
-      headers: { accept: "application/json" },
-      signal: controller.signal,
+    const response = await scannerClient.get(API_ENDPOINTS.CLASS_CODE_LOOKUP(code), {
+      signal: controller.signal
     });
 
-    if (!response.ok) {
+    if (response.status !== 200) {
       if (response.status === 404) {
         discoveryStats.notFound++;
       } else {
@@ -357,7 +375,7 @@ async function checkCode(code: number): Promise<Candidate | null> {
     }
 
     discoveryStats.ok++;
-    const data = await response.json();
+    const data = response.data;
     if (data.presenterEmail && data.cpcsRegion) {
       logDiscoveryStats();
       return { code, presenterEmail: data.presenterEmail, cpcsRegion: data.cpcsRegion };
@@ -365,7 +383,7 @@ async function checkCode(code: number): Promise<Candidate | null> {
     discoveryStats.invalidData++;
     logDiscoveryStats();
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
+    if (axios.isCancel(error) || (error instanceof Error && error.name === "AbortError") || (axios.isAxiosError(error) && error.code === 'ECONNABORTED')) {
       discoveryStats.timeout++;
     } else {
       discoveryStats.networkError++;

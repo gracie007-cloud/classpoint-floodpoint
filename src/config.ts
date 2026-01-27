@@ -27,9 +27,9 @@ export const SCANNER_CONFIG = {
   
   // Discovery Pool - Optimized for Server Reliability
   /** Number of concurrent API requests */
-  DISCOVERY_CONCURRENCY: 300,
+  DISCOVERY_CONCURRENCY: 500,
   /** Timeout for API requests (ms) - Increase to avoid server-side timeouts */
-  DISCOVERY_TIMEOUT: 4000,
+  DISCOVERY_TIMEOUT: 2000,
   
   // Validation Pool - Parallel WebSocket validation  
   /** Number of concurrent WebSocket connections */
