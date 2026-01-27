@@ -37,35 +37,44 @@ function signSessionId(sessionId: string): string {
 
 /**
  * Verify and extract session ID from signed value
+ * Also handles backwards compatibility with old unsigned UUIDs
  */
 function verifyAndExtractSessionId(signedValue: string): string | null {
   const parts = signedValue.split(".");
-  if (parts.length !== 2) {
-    return null;
-  }
   
-  const [sessionId, providedSignature] = parts;
-  if (!sessionId || !providedSignature) {
-    return null;
-  }
-  
-  const hmac = createHmac("sha256", getSessionSecret());
-  hmac.update(sessionId);
-  const expectedSignature = hmac.digest("hex").slice(0, 16);
-  
-  // Constant-time comparison to prevent timing attacks
-  if (providedSignature.length !== expectedSignature.length) {
-    return null;
-  }
-  
-  let isValid = true;
-  for (let i = 0; i < providedSignature.length; i++) {
-    if (providedSignature[i] !== expectedSignature[i]) {
-      isValid = false;
+  // New format: sessionId.signature
+  if (parts.length === 2) {
+    const [sessionId, providedSignature] = parts;
+    if (!sessionId || !providedSignature) {
+      return null;
     }
+    
+    const hmac = createHmac("sha256", getSessionSecret());
+    hmac.update(sessionId);
+    const expectedSignature = hmac.digest("hex").slice(0, 16);
+    
+    // Constant-time comparison to prevent timing attacks
+    if (providedSignature.length !== expectedSignature.length) {
+      return null;
+    }
+    
+    let isValid = true;
+    for (let i = 0; i < providedSignature.length; i++) {
+      if (providedSignature[i] !== expectedSignature[i]) {
+        isValid = false;
+      }
+    }
+    
+    return isValid ? sessionId : null;
   }
   
-  return isValid ? sessionId : null;
+  // Backwards compatibility: accept old unsigned UUIDs
+  // This allows migration from unsigned to signed cookies
+  if (parts.length === 1 && isValidSessionId(signedValue)) {
+    return signedValue;
+  }
+  
+  return null;
 }
 
 /**

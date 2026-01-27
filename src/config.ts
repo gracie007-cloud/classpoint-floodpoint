@@ -25,17 +25,17 @@ export const SCANNER_CONFIG = {
   /** Maximum scan duration in milliseconds (30 minutes) */
   MAX_SCAN_DURATION: 30 * 60 * 1000,
   
-  // Discovery Pool - Moderate API checking
+  // Discovery Pool - Fast API checking
   /** Number of concurrent API requests */
-  DISCOVERY_CONCURRENCY: 100,
-  /** Timeout for API requests (ms) - aggressive for speed */
-  DISCOVERY_TIMEOUT: 1000,
+  DISCOVERY_CONCURRENCY: 200,
+  /** Timeout for API requests (ms) - increased for server latency */
+  DISCOVERY_TIMEOUT: 3000,
   
   // Validation Pool - Parallel WebSocket validation  
   /** Number of concurrent WebSocket connections */
-  VALIDATION_CONCURRENCY: 20,
+  VALIDATION_CONCURRENCY: 30,
   /** Maximum wait for WebSocket event (ms) - exits early on event */
-  VALIDATION_TIMEOUT: 1500,
+  VALIDATION_TIMEOUT: 3000,
 } as const;
 
 /**
