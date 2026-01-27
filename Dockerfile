@@ -39,10 +39,11 @@ USER nextjs
 
 # Step 12: Set environment variable to production
 ENV NODE_ENV=production
+# Increase libuv thread pool for DNS lookups (default is 4, which bottlenecks high concurrency)
+ENV UV_THREADPOOL_SIZE=128
 
 # Step 13: Expose the port the app runs on
 EXPOSE 3000
 
 # Step 14: Command to run the app
 CMD ["npm", "run", "start"]
-
