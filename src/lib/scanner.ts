@@ -323,7 +323,8 @@ let discoveryStats = {
 function logDiscoveryStats() {
   const now = Date.now();
   if (now - discoveryStats.lastLogTime > 5000) { // Log every 5 seconds
-    logger.info(`[Discovery Stats] Total: ${discoveryStats.total}, OK: ${discoveryStats.ok}, 404: ${discoveryStats.notFound}, Other: ${discoveryStats.otherStatus}, Timeout: ${discoveryStats.timeout}, NetErr: ${discoveryStats.networkError}, Invalid: ${discoveryStats.invalidData}`);
+    // Use warn level to ensure it shows in production
+    logger.warn(`[Discovery Stats] Total: ${discoveryStats.total}, OK: ${discoveryStats.ok}, 404: ${discoveryStats.notFound}, Other: ${discoveryStats.otherStatus}, Timeout: ${discoveryStats.timeout}, NetErr: ${discoveryStats.networkError}, Invalid: ${discoveryStats.invalidData}`);
     discoveryStats.lastLogTime = now;
   }
 }
