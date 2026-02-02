@@ -48,13 +48,46 @@ export const SCANNER_CONFIG = {
  */
 export const CONNECTION_CONFIG = {
   /** Maximum number of concurrent connections */
-  MAX_CONNECTIONS: 100,
+  MAX_CONNECTIONS: 500,
   /** Minimum number of connections */
   MIN_CONNECTIONS: 1,
   /** Maximum length for name prefix */
   MAX_NAME_PREFIX_LENGTH: 20,
   /** Minimum length for name prefix */
   MIN_NAME_PREFIX_LENGTH: 1,
+} as const;
+
+/**
+ * Flooder rate limiting configuration
+ * Implements adaptive wave-based controller for intelligent rate management
+ */
+export const FLOODER_CONFIG = {
+  /** Initial concurrent connection attempts */
+  INITIAL_CONCURRENCY: 20,
+  /** Maximum concurrent attempts during healthy periods */
+  MAX_CONCURRENCY: 50,
+  /** Minimum concurrent attempts during throttling */
+  MIN_CONCURRENCY: 5,
+  /** Connections per wave before health check */
+  WAVE_SIZE: 50,
+  /** Delay between waves (ms) */
+  WAVE_DELAY: 2000,
+  /** Base retry delay (ms) */
+  RETRY_DELAY_BASE: 1000,
+  /** Maximum retry delay cap (ms) */
+  RETRY_DELAY_MAX: 15000,
+  /** Maximum retries per connection */
+  MAX_RETRIES: 3,
+  /** Success rate threshold to increase concurrency (0-1) */
+  HEALTHY_THRESHOLD: 0.9,
+  /** Success rate threshold to decrease concurrency (0-1) */
+  THROTTLE_THRESHOLD: 0.7,
+  /** Success rate threshold to exit throttle state (0-1) - Hysteresis for smoother transitions */
+  RECOVERY_THRESHOLD: 0.8,
+  /** Connection timeout (ms) */
+  CONNECTION_TIMEOUT: 10000,
+  /** Sliding window size for health tracking */
+  HEALTH_WINDOW_SIZE: 20,
 } as const;
 
 /**
@@ -75,6 +108,9 @@ export const API_ENDPOINTS = {
     )}&classCode=${encodeURIComponent(classCode)}&participantId=${encodeURIComponent(
       participantId
     )}&participantUsername=${encodeURIComponent(username)}`,
+  /** ClassPoint saved participants lookup */
+  SAVED_PARTICIPANTS_URL: (region: string, presenterEmail: string) =>
+    `https://${region}.classpoint.app/liveclasses/saved-participants?email=${encodeURIComponent(presenterEmail)}`,
 } as const;
 
 /**
@@ -117,32 +153,45 @@ export function validateConnectionCount(count: number): { valid: boolean; error?
 /**
  * Validates a class code
  */
-/**
- * Validates a class code
- */
-export function validateClassCode(code: string): { valid: boolean; error?: string } {
+export function validateClassCode(code: string, mode: 'guest' | 'restricted' = 'guest'): { valid: boolean; error?: string } {
   // 1. Basic type/empty check
   if (!code || typeof code !== 'string') {
     return { valid: false, error: "Class code is required" };
   }
 
   const trimmed = code.trim();
-  
+
+  // In restricted mode, allow alphanumeric codes (e.g., "GEO4A3O2")
+  if (mode === 'restricted') {
+    // Allow alphanumeric class codes (letters and numbers only)
+    if (!/^[a-zA-Z0-9]+$/.test(trimmed)) {
+      return { valid: false, error: "Class code can only contain letters and numbers" };
+    }
+
+    // Length check: reasonable range for any class code
+    if (trimmed.length < 3 || trimmed.length > 20) {
+      return { valid: false, error: "Class code must be between 3 and 20 characters" };
+    }
+
+    return { valid: true };
+  }
+
+  // Guest mode: strict numeric validation for scanning
   // 2. Length check (ClassPoint codes are typically 5 digits)
   if (trimmed.length !== 5) {
     return { valid: false, error: "Class code must be exactly 5 digits" };
   }
-  
+
   // 3. Strict numeric check using regex (prevent "12e3" or hex)
   if (!/^\d+$/.test(trimmed)) {
     return { valid: false, error: "Class code must contain only numbers" };
   }
-  
+
   // 4. Numeric range check
   const numericCode = parseInt(trimmed, 10);
   if (numericCode < SCANNER_CONFIG.START_CODE || numericCode > SCANNER_CONFIG.END_CODE) {
     return { valid: false, error: `Class code must be between ${SCANNER_CONFIG.START_CODE} and ${SCANNER_CONFIG.END_CODE}` };
   }
-  
+
   return { valid: true };
 }

@@ -77,6 +77,20 @@ export interface FlooderConfig {
 }
 
 /**
+ * Saved participant from ClassPoint API
+ */
+export interface SavedParticipant {
+  participantUsername: string;
+  participantName: string;
+  participantAvatar: string | null;
+}
+
+/**
+ * Flooder mode
+ */
+export type FlooderMode = 'guest' | 'restricted';
+
+/**
  * Configuration for the scanner
  */
 export interface ScannerConfig {
@@ -130,3 +144,56 @@ export interface ScanResultsResponse {
   message?: string;
 }
 
+/**
+ * Progress tracking for the flooder with adaptive rate limiting
+ */
+export interface FlooderProgress {
+  /** Total connections requested by user */
+  totalRequested: number;
+  /** Successfully connected bots */
+  connected: number;
+  /** Currently attempting to connect */
+  connecting: number;
+  /** Failed connections (exhausted retries) */
+  failed: number;
+  /** Connections waiting for retry */
+  retrying: number;
+  /** Current wave number */
+  waveNumber: number;
+  /** Current dynamic concurrency level */
+  currentConcurrency: number;
+  /** Recent success rate (0-1) */
+  successRate: number;
+  /** Whether rate limiting is detected */
+  isThrottled: boolean;
+  /** Estimated time remaining in ms, null if unknown */
+  estimatedTimeRemaining: number | null;
+
+  // Enhanced visibility fields
+  /** Whether currently waiting for retry window */
+  waitingForRetry?: boolean;
+  /** Milliseconds until next retry attempt */
+  nextRetryIn?: number | null;
+  /** Current system status for display */
+  statusMessage?: string;
+  /** Average latency of recent connections (ms) */
+  averageLatency?: number;
+  /** Whether in cooldown period */
+  inCooldown?: boolean;
+  /** Cooldown remaining (ms) */
+  cooldownRemaining?: number;
+  /** Breakdown of retry errors by type */
+  retryErrorCounts?: Record<string, number>;
+}
+
+/**
+ * Retry state for a failed connection
+ */
+export interface RetryState {
+  /** Connection ID */
+  id: number;
+  /** Number of retry attempts made */
+  retries: number;
+  /** Timestamp when next retry is allowed */
+  nextRetryAt: number;
+}

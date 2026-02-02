@@ -17,9 +17,10 @@ export async function GET(request: Request): Promise<Response> {
 
     const { searchParams } = new URL(request.url);
     const classCode = searchParams.get("code");
+    const mode = (searchParams.get("mode") || "guest") as "guest" | "restricted";
 
-    // Use centralized validation
-    const validation = validateClassCode(classCode || "");
+    // Use centralized validation with mode
+    const validation = validateClassCode(classCode || "", mode);
     if (!validation.valid) {
       return NextResponse.json(
         { error: validation.error || "Invalid class code" },
